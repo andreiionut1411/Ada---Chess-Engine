@@ -10,4 +10,5 @@ In the folder src is the code for the engine, while in out there is a .jar file,
 
 **Versions**
 Ada 1.0: It is based on the negamax algorithm with alpha-beta pruning, calculating 6 ply deep. It uses the Piece-Square Tables Only evaluation function by Ronald Friederich.
+ELO: 1500 - 1550
 
