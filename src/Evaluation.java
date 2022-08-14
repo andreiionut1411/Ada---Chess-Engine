@@ -1,4 +1,5 @@
 public class Evaluation {
+    private static final MoveGen moveGen = new MoveGen();
     private static final int[] mg_value = { 82, 337, 365, 477, 1025,  0};
     private static final int[] eg_value = { 94, 281, 297, 512,  936,  0};
 
@@ -134,13 +135,22 @@ public class Evaluation {
             -53, -34, -21, -11, -28, -14, -24, -43
     };
 
+    // We use a lazy evaluation, that first calculates the material and general position of pieces,
+    // and for moves where we are close to alpha and beta, we evaluate more in depth.
     public static int eval(long wp, long wr, long wn, long wb, long wq, long wk,
-                           long bp, long br, long bn, long bb, long bq, long bk, boolean endGame) {
+                           long bp, long br, long bn, long bb, long bq, long bk, boolean endGame,
+                           int alpha, int beta, int numOfPseudoMoves, boolean isWhite, int ply) {
 
         int evaluation = 0;
         evaluation += evaluateMaterialAndPosition(wp, wr, wn, wb, wq, wk, bp, br, bn, bb, bq, bk, endGame);
 
-        return evaluation;
+        // If we are winning by 2 pawns, we don't need to go deeper into analysis.
+        if ((evaluation <= alpha - 270 || evaluation >= beta + 270) && !endGame) {
+            return evaluation;
+        }
+
+        return evaluation + stageTwoEval(wp, wr, wn, wb, wq, wk, bp, br, bn, bb, bq, bk, numOfPseudoMoves, isWhite,
+                endGame, ply);
     }
 
     // The method calculates the material points and the points based on the position of the pieces.
@@ -192,5 +202,292 @@ public class Evaluation {
         }
 
         return evaluation;
+    }
+
+    // In the more in-depth evaluation, we evaluate mobility, pawn structure and space.
+    private static int stageTwoEval(long wp, long wr, long wn, long wb, long wq, long wk,
+                                    long bp, long br, long bn, long bb, long bq, long bk,
+                                    int numOfPseudoMoves, boolean isWhite, boolean endGame, int ply) {
+
+        long occupied = wp | wr | wn | wb | wq | wk | bp | br | bb | bn | bq | bk;
+        long notWhitePieces = ~(wp | wr | wn | wb | wq | wk);
+        long notBlackPieces = ~(bp | br | bn | bb | bq | bk);
+        int numberOfPieces = -1;
+        int evaluation = 0;
+
+        if (endGame) {
+            numberOfPieces = numberOfPieces(occupied);
+
+            // In the endgame, the king needs to aid the player in trying to give checkmate.
+            if (numberOfPieces <= 15) {
+                evaluation += ((evaluateKingPosition(wk, bk, numberOfPieces)) -
+                        evaluateKingPosition(bk, wk, numberOfPieces));
+            }
+        }
+
+        evaluation = evaluation + evaluatePawnStructureW(wp, bp, occupied, endGame, ply, numberOfPieces) -
+                evaluatePawnStructureB(wp, bp, occupied, endGame, ply, numberOfPieces);
+
+        evaluation += (evaluateCenterControl(wp, wr, wn, wb, wq, wk, notWhitePieces, true, endGame) -
+                       evaluateCenterControl(bp, br, bn, bb, bq, bk, notBlackPieces, false, endGame));
+
+        String opponentMoves = moveGen.possibleMoves(wp, wr, wn, wb, wq, wk, bp, br, bn, bb, bq, bk, 0L, !isWhite,
+                false, false, false, false);
+
+        if (isWhite) {
+            evaluation += (numOfPseudoMoves - opponentMoves.length() / 4) * 4;
+        } else {
+            evaluation += (opponentMoves.length() / 4 - numOfPseudoMoves) * 4;
+        }
+
+        return evaluation;
+    }
+
+    // The method returns the bonus for the pawn structure for white.
+    private static int evaluatePawnStructureW(long wp, long bp, long occupied, boolean endGame, int ply, int number) {
+        int evaluation = 0;
+        long bitboard = (wp & (wp << 7) & ~MoveGen.fileA) | (wp & (wp << 9) & ~MoveGen.fileH);
+        long location = bitboard & -bitboard;
+
+        // pawn phalanx
+        while (location != 0) {
+            int position = Long.numberOfTrailingZeros(location);
+            evaluation += 5;
+
+            bitboard = bitboard & ~(1L << position);
+            location = bitboard & -bitboard;
+        }
+
+        // blocked pawns
+        bitboard = ((wp << 8) & occupied);
+        location = bitboard & -bitboard;
+
+        while (location != 0) {
+            int position = Long.numberOfTrailingZeros(location);
+            evaluation -= 4;
+
+            bitboard = bitboard & ~(1L << position);
+            location = bitboard & -bitboard;
+        }
+
+        // doubled pawns.
+        for (int i = 0; i < 8; i++) {
+            bitboard = wp & MoveGen.fileMask[i];
+            location = bitboard & -bitboard;
+            int counter = 0;
+
+            while (location != 0) {
+                int position = Long.numberOfTrailingZeros(location);
+                counter++;
+
+                bitboard = bitboard & ~(1L << position);
+                location = bitboard & -bitboard;
+            }
+
+            if (counter > 1) evaluation -= (counter - 1) * 10; // tripled pawns are even worse.
+        }
+
+        if (endGame || ply > 30) {
+
+            if (number == -1){
+                evaluation += (evaluatePassedPawnW(wp, bp)) * 25;
+            } else {
+                evaluation += (evaluatePassedPawnW(wp, bp)) * (16 - number) * 5;
+            }
+        }
+
+        return evaluation;
+    }
+
+    // The method returns the bonus for the pawn structure for black.
+    private static int evaluatePawnStructureB(long wp, long bp, long occupied, boolean endGame, int ply, int number) {
+        int evaluation = 0;
+        long bitboard = (bp & (bp >>> 7) & ~MoveGen.fileH) | (bp & (bp >>> 9) & ~MoveGen.fileA);
+        long location = bitboard & -bitboard;
+
+        // pawn phalanx
+        while (location != 0) {
+            int position = Long.numberOfTrailingZeros(location);
+            evaluation += 5;
+
+            bitboard = bitboard & ~(1L << position);
+            location = bitboard & -bitboard;
+        }
+
+        // blocked pawns
+        bitboard = ((bp >>> 8) & occupied);
+        location = bitboard & -bitboard;
+
+        while (location != 0) {
+            int position = Long.numberOfTrailingZeros(location);
+            evaluation -= 4;
+
+            bitboard = bitboard & ~(1L << position);
+            location = bitboard & -bitboard;
+        }
+
+        // doubled pawns.
+        for (int i = 0; i < 8; i++) {
+            bitboard = bp & MoveGen.fileMask[i];
+            location = bitboard & -bitboard;
+            int counter = 0;
+
+            while (location != 0) {
+                int position = Long.numberOfTrailingZeros(location);
+                counter++;
+
+                bitboard = bitboard & ~(1L << position);
+                location = bitboard & -bitboard;
+            }
+
+            if (counter > 1) evaluation -= (counter - 1) * 10; // tripled pawns are even worse.
+        }
+
+        if (endGame || ply > 30) {
+            if (number == -1){
+                evaluation += (evaluatePassedPawnB(wp, bp)) * 25;
+            } else {
+                evaluation += (evaluatePassedPawnB(wp, bp)) * (16 - number) * 5;
+            }
+        }
+
+        return evaluation;
+    }
+
+    // The method counts the number of passed pawns.
+    private static int evaluatePassedPawnW(long wp, long bp) {
+        long location = wp & -wp;
+        int counter = 0;
+
+        while (location != 0) {
+            int position = Long.numberOfLeadingZeros(location);
+            int x = position % 8;
+            int y = position / 8;
+
+            if ((bp & (MoveGen.fileMask[x]) & MoveGen.firstRanks[y - 1]) != 0) {
+                wp = wp & ~location;
+                location = wp & -wp;
+                continue;
+            }
+
+            if (x > 0) {
+                if ((bp & (MoveGen.fileMask[x - 1]) & MoveGen.firstRanks[y - 1]) != 0){
+                    wp = wp & ~location;
+                    location = wp & -wp;
+                    continue;
+                }
+            }
+
+            if (x < 7) {
+                if ((bp & (MoveGen.fileMask[x + 1]) & MoveGen.firstRanks[y - 1]) != 0) {
+                    wp = wp & ~location;
+                    location = wp & -wp;
+                    continue;
+                }
+            }
+
+            wp = wp & ~location;
+            location = wp & -wp;
+            counter++;
+        }
+
+        return counter;
+    }
+
+    private static int evaluatePassedPawnB(long wp, long bp) {
+        long location = bp & -bp;
+        int counter = 0;
+
+        while (location != 0) {
+            int position = Long.numberOfLeadingZeros(location);
+            int x = position % 8;
+            int y = position / 8;
+
+            if ((wp & (MoveGen.fileMask[x]) & MoveGen.lastRanks[y + 1]) != 0) {
+                bp = bp & ~location;
+                location = bp & -bp;
+                continue;
+            }
+
+            if (x > 0) {
+                if ((wp & (MoveGen.fileMask[x - 1]) & MoveGen.lastRanks[y + 1]) != 0){
+                    bp = bp & ~location;
+                    location = bp & -bp;
+                    continue;
+                }
+            }
+
+            if (x < 7) {
+                if ((wp & (MoveGen.fileMask[x + 1]) & MoveGen.lastRanks[y + 1]) != 0) {
+                    bp = bp & ~location;
+                    location = bp & -bp;
+                    continue;
+                }
+            }
+
+            bp = bp & ~location;
+            location = bp & -bp;
+            counter++;
+        }
+
+        return counter;
+    }
+
+    private static int evaluateCenterControl(long p, long r, long n, long b, long q, long k,
+                                             long playerPieces, boolean white, boolean endGame) {
+        long controlledByPlayer = moveGen.controlledSquares(p, r, n, b, q, k, playerPieces, white);
+        controlledByPlayer = MoveGen.center & controlledByPlayer; // we get ones where we can put our pieces
+        int eval = 0;
+
+        for (int i = 2; i < 6; i++) {
+            for (int j = 2; j < 6; j++) {
+                if ((controlledByPlayer & (1L << (63 - (i * 8 + j)))) != 0) {
+                    if (!endGame) eval += 6;
+                }
+            }
+        }
+
+        return eval;
+    }
+
+    // The method calculates the number of pieces still in play, in order to get an endgame score.
+    private static int numberOfPieces(long occupied) {
+        int counter = 0;
+        for (int i = 0; i < 64; i++) {
+            if ((occupied & (1L << i)) != 0){
+                counter++;
+            }
+        }
+
+        return counter;
+    }
+
+    // In the endgame, we want the king to help out with delivering checkmate.
+    // The king should be close to the enemy king, and away from the margins,
+    // because on the edge of the board it is easier to get checkmated.
+    private static int evaluateKingPosition(long king, long opponentKing, int number){
+        king = king & -king;
+        int kingLoc = Long.numberOfLeadingZeros(king);
+        opponentKing = opponentKing & -opponentKing;
+        int oppKingLoc = Long.numberOfLeadingZeros(opponentKing);
+
+        int evaluation = 0;
+
+        int x = kingLoc % 8;
+        int y = kingLoc / 8;
+        int oppX = oppKingLoc % 8;
+        int oppY = oppKingLoc / 8;
+
+        if (oppX > 3) {
+            if (oppY > 3)  evaluation += (oppX - 4) + (oppY - 4);
+            else evaluation += (oppX - 4) + (3 - oppY);
+        } else {
+            if (oppY > 3) evaluation += (3 - oppX) + (oppY - 4);
+            else evaluation += (3 - oppX) + (3 - oppY);
+        }
+
+        evaluation += (14 - (Math.abs(x - oppX) + Math.abs(y - oppY)));
+
+        return evaluation * (16 - number) * 3;
     }
 }
