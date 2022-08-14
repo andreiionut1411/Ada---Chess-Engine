@@ -485,14 +485,22 @@ public class GraphicalInterface extends JPanel implements MouseListener, MouseMo
 
     public void makeEngineMove() {
         MoveGen.isEndGame = Engine.verifyEndGame(MoveGen.wq, MoveGen.bq, MoveGen.isEndGame);
+        Engine.counter = 0;
+        Engine.emptyKillerMoves();
 
         String move = Engine.alphaBeta(Engine.maxDepth, Integer.MIN_VALUE / 2, Integer.MAX_VALUE / 2, "",
                 MoveGen.wp, MoveGen.wr, MoveGen.wn, MoveGen.wb, MoveGen.wq, MoveGen.wk,
                 MoveGen.bp, MoveGen.br, MoveGen.bn, MoveGen.bb, MoveGen.bq, MoveGen.bk, MoveGen.enPassant,
                 MoveGen.whiteCastleK, MoveGen.whiteCastleQ, MoveGen.blackCastleK, MoveGen.blackCastleQ,
-                MoveGen.white, MoveGen.isEndGame);
+                MoveGen.white, MoveGen.isEndGame, Engine.ply);
 
         Engine.tryMove(move.substring(0, 4), true);
+
+        // If we are in the endgame, there are fewer pieces, so less to calculate. This means, that
+        // we can go a little deeper.
+        if (Engine.counter < 500000 && Engine.maxDepth < 9 && Engine.ply > 30 && MoveGen.isEndGame) {
+            Engine.maxDepth++;
+        }
 
         repaint();
         if (!verifyNotEndOfGame()) {
