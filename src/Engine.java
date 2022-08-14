@@ -1,7 +1,8 @@
-import java.util.Scanner;
-
 public class Engine {
-    public static final int maxDepth = 6;
+    public static int ply = 0;
+    public static int maxDepth = 6;
+    public static int counter = 0;
+    public static String[][] killerMoves = new String[11][3];
 
     private static final MoveGen moveGen = new MoveGen();
 
@@ -199,6 +200,7 @@ public class Engine {
         MoveGen.blackCastleK = bckt;
         MoveGen.blackCastleQ = bcqt;
         MoveGen.white = !MoveGen.white; // We change the player's turn.
+        ply++;
     }
 
     // The method verifies if we are in the endgame or not.
@@ -210,6 +212,83 @@ public class Engine {
         return true;
     }
 
+    public static void emptyKillerMoves() {
+        for (int i = 0; i < maxDepth; i++) {
+            for (int j = 0; j < 3; j++){
+                killerMoves[i][j] = null;
+            }
+        }
+    }
+
+    private static void addKillerMove(String move, int depth) {
+        if (killerMoves[depth][0] == null) killerMoves[depth][0] = move;
+        else if (killerMoves[depth][1] == null) killerMoves[depth][1] = move;
+        else killerMoves[depth][2] = move;
+    }
+
+    private static boolean searchKillerMoves(String move, int depth) {
+        if (move.equals(killerMoves[depth][0])) return true;
+        else if (move.equals(killerMoves[depth][1])) return true;
+        else return move.equals(killerMoves[depth][2]);
+    }
+
+    private static long whitePawnsControl(long wp) {
+        return ((wp << 7) & ~MoveGen.fileA) | ((wp << 9) & ~MoveGen.fileH);
+    }
+
+    private static long blackPawnsControl(long bp) {
+        return ((bp >>> 7) & ~MoveGen.fileH) | ((bp >>> 9) & ~MoveGen.fileA);
+    }
+
+    // We sort the moves based on the fact that promotions are generally good,
+    // taking a piece with a pawn is good, but moving a piece to a pawn controlled square
+    // is bad.
+    private static String sortMoves(String moves, long wp, long bp, long whitePieces, long blackPieces,
+                                    boolean white, int depth) {
+        StringBuilder goodMoves = new StringBuilder();
+        StringBuilder badMoves = new StringBuilder();
+        StringBuilder normalMoves = new StringBuilder();
+        StringBuilder prevKillerMoves = new StringBuilder();
+        long blackControl = blackPawnsControl(bp);
+        long whiteControl = whitePawnsControl(wp);
+
+        for (int i = 0; i < moves.length(); i += 4) {
+            String move = moves.substring(i, i + 4);
+            if (searchKillerMoves(move, depth)) prevKillerMoves.append(move);
+
+            else if (Character.isDigit(move.charAt(3))) {
+                int start = (move.charAt(0) - '0') * 8 + (move.charAt(1) - '0');
+                int end = (move.charAt(2) - '0') * 8 + (move.charAt(3) - '0');
+
+                if (white) {
+                    if ((wp & (1L << (63 - start))) != 0 && (blackPieces & (1L << (63 - end))) != 0) {
+                        goodMoves.append(move);
+                    } else if ((whitePieces & (1L << (63 - start))) != 0 &&
+                            (blackControl & (1L << (63 - end))) != 0) {
+                        badMoves.append(move);
+                    } else {
+                        normalMoves.append(move);
+                    }
+                } else {
+                    if ((bp & (1L << (63 - start))) != 0 && (whitePieces & (1L << 63 - end)) != 0) {
+                        goodMoves.append(move);
+                    } else if ((blackPieces & (1L << (63 - start))) != 0 &&
+                            (whiteControl & (1L << (63 - end))) != 0) {
+                        badMoves.append(move);
+                    } else {
+                        normalMoves.append(move);
+                    }
+                }
+            } else if (move.charAt(3) == 'E' || move.charAt(3) == 'C') {
+                normalMoves.append(move);
+            } else if (move.charAt(3) == 'P') {
+                goodMoves.append(move);
+            }
+        }
+
+        return String.valueOf(goodMoves.append(prevKillerMoves).append(normalMoves).append(badMoves));
+    }
+
     // The method returns the best move for the current position, as well as the evaluation for
     // said position. The return value has the first 5 letters representing the move, using our
     // notation, and the score is what comes after. The argument player is either a 0, or a 1.
@@ -219,26 +298,31 @@ public class Engine {
                             long wp, long wr, long wn, long wb, long wq, long wk,
                             long bp, long br, long bn, long bb, long bq, long bk,
                             long ep, boolean wck, boolean wcq, boolean bck, boolean bcq,
-                            boolean white, boolean endGame) {
+                            boolean white, boolean endGame, int ply) {
 
         String returnString;
         String bestMove;
         boolean legalMoves = false;
 
+        String moves = moveGen.possibleMoves(wp, wr, wn, wb, wq, wk, bp, br, bn, bb, bq, bk, ep, white,
+                wck, wcq, bck, bcq);
+
         if (depth == 0) {
-            int eval = Evaluation.eval(wp, wr, wn, wb, wq, wk, bp, br, bn, bb, bq, bk, endGame);
+            int eval = Evaluation.eval(wp, wr, wn, wb, wq, wk, bp, br, bn, bb, bq, bk, endGame, alpha, beta,
+                    moves.length() / 4, white, ply);
 
             if (white) return move + eval;
             else return move + (-eval);
         }
 
-        String moves = moveGen.possibleMoves(wp, wr, wn, wb, wq, wk, bp, br, bn, bb, bq, bk, ep, white,
-                wck, wcq, bck, bcq);
-
+        long whitePieces = wr | wn | wb | wq | wk;
+        long blackPieces = br | bn | bb | bq | bk;
+        moves = sortMoves(moves, wp, bp, whitePieces, blackPieces, white, depth);
         bestMove = moves.substring(0, 4);
         int score = Integer.MIN_VALUE;
 
         for (int i = 0; i < moves.length(); i += 4) {
+            counter++;
             String crtMove = moves.substring(i, i + 4);
             long wpt = Engine.makeMoveForPiece(wp, crtMove, 'P', white);
             long wrt = Engine.makeMoveForPiece(wr, crtMove, 'R', white);
@@ -263,12 +347,21 @@ public class Engine {
             MoveGen.occupied = wpt | wrt | wnt | wbt | wqt | wkt | bpt | brt | bnt | bbt | bqt | bkt;
             MoveGen.empty = ~MoveGen.occupied;
             boolean endGamet = verifyEndGame(wqt, bqt, endGame);
-            if ((white && (wkt & moveGen.controlledSquares(bpt, brt, bnt, bbt, bqt, bkt, notBlackPieces, false)) == 0) ||
-                    (!white && (bkt & moveGen.controlledSquares(wpt, wrt, wnt, wbt, wqt, wkt, notWhitePieces, true)) == 0)) {
+
+            long controlledSquares;
+
+            if (white){
+                controlledSquares = moveGen.controlledSquares(bpt, brt, bnt, bbt, bqt, bkt, notBlackPieces, false);
+            } else {
+                controlledSquares = moveGen.controlledSquares(wpt, wrt, wnt, wbt, wqt, wkt, notWhitePieces, true);
+            }
+
+            if ((white && (wkt & controlledSquares) == 0) ||
+                    (!white && (bkt & controlledSquares) == 0)) {
 
                 legalMoves = true;
                 returnString = alphaBeta(depth - 1, -beta, -alpha, crtMove, wpt, wrt, wnt, wbt, wqt, wkt,
-                        bpt, brt, bnt, bbt, bqt, bkt, ept, wckt, wcqt, bckt, bcqt, !white, endGamet);
+                        bpt, brt, bnt, bbt, bqt, bkt, ept, wckt, wcqt, bckt, bcqt, !white, endGamet, ply + 1);
 
                 int cur = -Integer.parseInt(returnString.substring(4));
 
@@ -282,6 +375,7 @@ public class Engine {
                 }
 
                 if (alpha >= beta) {
+                    addKillerMove(bestMove, depth);
                     return bestMove + alpha;
                 }
             }
