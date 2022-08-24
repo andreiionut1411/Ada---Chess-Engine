@@ -1,3 +1,5 @@
+import java.util.TreeSet;
+
 public class Engine {
     public static int ply = 0;
     public static int maxDepth = 6;
@@ -242,48 +244,57 @@ public class Engine {
 
     // We sort the moves based on the fact that promotions are generally good,
     // taking a piece with a pawn is good, but moving a piece to a pawn controlled square
-    // is bad.
+    // is bad. The bestMove parameter is given to us by a previous search, if one exists.
     private static String sortMoves(String moves, long wp, long bp, long whitePieces, long blackPieces,
-                                    boolean white, int depth) {
+                                    boolean white, int depth, String bestMove) {
         StringBuilder goodMoves = new StringBuilder();
         StringBuilder badMoves = new StringBuilder();
         StringBuilder normalMoves = new StringBuilder();
         StringBuilder prevKillerMoves = new StringBuilder();
+        boolean foundFirstMove = false;
         long blackControl = blackPawnsControl(bp);
         long whiteControl = whitePawnsControl(wp);
 
         for (int i = 0; i < moves.length(); i += 4) {
             String move = moves.substring(i, i + 4);
-            if (searchKillerMoves(move, depth)) prevKillerMoves.append(move);
+            if (!bestMove.equals(move)) {
+                if (searchKillerMoves(move, depth)) prevKillerMoves.append(move);
 
-            else if (Character.isDigit(move.charAt(3))) {
-                int start = (move.charAt(0) - '0') * 8 + (move.charAt(1) - '0');
-                int end = (move.charAt(2) - '0') * 8 + (move.charAt(3) - '0');
+                else if (Character.isDigit(move.charAt(3))) {
+                    int start = (move.charAt(0) - '0') * 8 + (move.charAt(1) - '0');
+                    int end = (move.charAt(2) - '0') * 8 + (move.charAt(3) - '0');
 
-                if (white) {
-                    if ((wp & (1L << (63 - start))) != 0 && (blackPieces & (1L << (63 - end))) != 0) {
-                        goodMoves.append(move);
-                    } else if ((whitePieces & (1L << (63 - start))) != 0 &&
-                            (blackControl & (1L << (63 - end))) != 0) {
-                        badMoves.append(move);
+                    if (white) {
+                        if ((wp & (1L << (63 - start))) != 0 && (blackPieces & (1L << (63 - end))) != 0) {
+                            goodMoves.append(move);
+                        } else if ((whitePieces & (1L << (63 - start))) != 0 &&
+                                (blackControl & (1L << (63 - end))) != 0) {
+                            badMoves.append(move);
+                        } else {
+                            normalMoves.append(move);
+                        }
                     } else {
-                        normalMoves.append(move);
+                        if ((bp & (1L << (63 - start))) != 0 && (whitePieces & (1L << 63 - end)) != 0) {
+                            goodMoves.append(move);
+                        } else if ((blackPieces & (1L << (63 - start))) != 0 &&
+                                (whiteControl & (1L << (63 - end))) != 0) {
+                            badMoves.append(move);
+                        } else {
+                            normalMoves.append(move);
+                        }
                     }
-                } else {
-                    if ((bp & (1L << (63 - start))) != 0 && (whitePieces & (1L << 63 - end)) != 0) {
-                        goodMoves.append(move);
-                    } else if ((blackPieces & (1L << (63 - start))) != 0 &&
-                            (whiteControl & (1L << (63 - end))) != 0) {
-                        badMoves.append(move);
-                    } else {
-                        normalMoves.append(move);
-                    }
+                } else if (move.charAt(3) == 'E' || move.charAt(3) == 'C') {
+                    normalMoves.append(move);
+                } else if (move.charAt(3) == 'P') {
+                    goodMoves.append(move);
                 }
-            } else if (move.charAt(3) == 'E' || move.charAt(3) == 'C') {
-                normalMoves.append(move);
-            } else if (move.charAt(3) == 'P') {
-                goodMoves.append(move);
+            } else {
+                foundFirstMove = true;
             }
+        }
+
+        if (foundFirstMove) {
+            return bestMove + goodMoves.append(prevKillerMoves).append(normalMoves).append(badMoves);
         }
 
         return String.valueOf(goodMoves.append(prevKillerMoves).append(normalMoves).append(badMoves));
@@ -317,7 +328,7 @@ public class Engine {
 
         long whitePieces = wr | wn | wb | wq | wk;
         long blackPieces = br | bn | bb | bq | bk;
-        moves = sortMoves(moves, wp, bp, whitePieces, blackPieces, white, depth);
+        moves = sortMoves(moves, wp, bp, whitePieces, blackPieces, white, depth, "");
         bestMove = moves.substring(0, 4);
         int score = Integer.MIN_VALUE;
 
@@ -390,6 +401,147 @@ public class Engine {
             }
             return move + (Integer.MIN_VALUE / 3 - depth * 300);
         }
+        return bestMove + score;
+    }
+
+    // An implementation of Principal Variation Search to replace the negamax algorithm as an optimization.
+    public static String pvs(int depth, int alpha, int beta, String move,
+                             long wp, long wr, long wn, long wb, long wq, long wk,
+                             long bp, long br, long bn, long bb, long bq, long bk,
+                             long ep, boolean wck, boolean wcq, boolean bck, boolean bcq,
+                             boolean white, boolean endGame, int ply)
+    {
+        String returnString;
+        String bestMove;
+        String firstMove = "";
+        boolean legalMoves = false;
+        long zobristHash = Transposition.makeZobristHash(wp, wr, wn, wb, wq, wk, bp, br, bn, bb, bq, bk, ep,
+                wck, wcq, bck, bcq, white);
+        Position position = Transposition.getInformationFromTransposition(zobristHash);
+
+        if (position != null) {
+
+            firstMove = position.bestMove;
+        }
+
+        String moves = moveGen.possibleMoves(wp, wr, wn, wb, wq, wk, bp, br, bn, bb, bq, bk, ep, white,
+                wck, wcq, bck, bcq);
+
+        if (depth == 0) {
+            int eval = Evaluation.eval(wp, wr, wn, wb, wq, wk, bp, br, bn, bb, bq, bk, endGame, alpha, beta,
+                    moves.length() / 4, white, ply);
+
+            if (white){
+                Transposition.addPosition(zobristHash, "", 0, eval);
+                return move + eval;
+            } else {
+                Transposition.addPosition(zobristHash, "", 0, -eval);
+                return move + (-eval);
+            }
+        }
+
+        long whitePieces = wr | wn | wb | wq | wk;
+        long blackPieces = br | bn | bb | bq | bk;
+        moves = sortMoves(moves, wp, bp, whitePieces, blackPieces, white, depth, firstMove);
+        bestMove = moves.substring(0, 4);
+        int score = Integer.MIN_VALUE;
+
+        for (int i = 0; i < moves.length(); i += 4) {
+            counter++;
+            String crtMove = moves.substring(i, i + 4);
+            long wpt = Engine.makeMoveForPiece(wp, crtMove, 'P', white);
+            long wrt = Engine.makeMoveForPiece(wr, crtMove, 'R', white);
+            long wnt = Engine.makeMoveForPiece(wn, crtMove, 'N', white);
+            long wbt = Engine.makeMoveForPiece(wb, crtMove, 'B', white);
+            long wqt = Engine.makeMoveForPiece(wq, crtMove, 'Q', white);
+            long wkt = Engine.makeMoveForPiece(wk, crtMove, 'K', white);
+            long bpt = Engine.makeMoveForPiece(bp, crtMove, 'p', white);
+            long brt = Engine.makeMoveForPiece(br, crtMove, 'r', white);
+            long bnt = Engine.makeMoveForPiece(bn, crtMove, 'n', white);
+            long bbt = Engine.makeMoveForPiece(bb, crtMove, 'b', white);
+            long bqt = Engine.makeMoveForPiece(bq, crtMove, 'q', white);
+            long bkt = Engine.makeMoveForPiece(bk, crtMove, 'k', white);
+            long ept = Engine.verifyEnPassant(crtMove, wp, bp, white);
+            boolean wckt = Engine.verifyCastling(wck, wrt, MoveGen.initialRookPos[3], wkt, 3);
+            boolean wcqt = Engine.verifyCastling(wcq, wrt, MoveGen.initialRookPos[2], wkt, 3);
+            boolean bckt = Engine.verifyCastling(bck, brt, MoveGen.initialRookPos[1], bkt, 59);
+            boolean bcqt = Engine.verifyCastling(bcq, brt, MoveGen.initialRookPos[0], bkt, 59);
+
+            long notWhitePieces = ~(wpt | wrt | wnt | wbt | wqt | wkt);
+            long notBlackPieces = ~(bpt | brt | bnt | bbt | bqt | bkt);
+            MoveGen.occupied = wpt | wrt | wnt | wbt | wqt | wkt | bpt | brt | bnt | bbt | bqt | bkt;
+            MoveGen.empty = ~MoveGen.occupied;
+            boolean endGamet = verifyEndGame(wqt, bqt, endGame);
+
+            long controlledSquares;
+
+            if (white){
+                controlledSquares = moveGen.controlledSquares(bpt, brt, bnt, bbt, bqt, bkt, notBlackPieces, false);
+            } else {
+                controlledSquares = moveGen.controlledSquares(wpt, wrt, wnt, wbt, wqt, wkt, notWhitePieces, true);
+            }
+
+            if ((white && (wkt & controlledSquares) == 0) ||
+                    (!white && (bkt & controlledSquares) == 0)) {
+                int cur;
+
+                if (!legalMoves) {
+                    returnString = pvs(depth - 1, -beta, -alpha, crtMove, wpt, wrt, wnt, wbt, wqt, wkt,
+                            bpt, brt, bnt, bbt, bqt, bkt, ept, wckt, wcqt, bckt, bcqt, !white, endGamet, ply + 1);
+                } else {
+                    returnString = pvs(depth - 1, -alpha - 1, -alpha, crtMove, wpt, wrt, wnt, wbt, wqt, wkt,
+                            bpt, brt, bnt, bbt, bqt, bkt, ept, wckt, wcqt, bckt, bcqt, !white, endGamet, ply + 1);
+
+                    if (returnString.length() > 4) {
+                        cur = -Integer.parseInt(returnString.substring(4));
+                    } else {
+                        cur = -Integer.parseInt(returnString);
+                    }
+
+                    if ((alpha < cur) && (cur < beta)) {
+                        returnString = pvs(depth - 1, -beta, -cur, crtMove, wpt, wrt, wnt, wbt, wqt, wkt,
+                                bpt, brt, bnt, bbt, bqt, bkt, ept, wckt, wcqt, bckt, bcqt, !white, endGamet, ply + 1);
+                    }
+                }
+
+                if (returnString.length() > 4) {
+                    cur = -Integer.parseInt(returnString.substring(4));
+                } else {
+                    cur = -Integer.parseInt(returnString);
+                }
+
+                legalMoves = true;
+                if (cur > score) {
+                    score = cur;
+                    bestMove = crtMove;
+                }
+
+                if (score > alpha) {
+                    alpha = score;
+                }
+
+                if (alpha >= beta) {
+                    addKillerMove(bestMove, depth);
+                    Transposition.addPosition(zobristHash, bestMove, depth, alpha);
+                    return bestMove + alpha;
+                }
+            }
+        }
+
+        long notWhitePieces = ~(wp | wr | wn | wb | wq | wk);
+        long notBlackPieces = ~(bp | br | bn | bb | bq | bk);
+        if (!legalMoves) {
+            if ((white && (wk & moveGen.controlledSquares(bp, br, bn, bb, bq, bk, notBlackPieces, false)) == 0) ||
+                    (!white && (bk & moveGen.controlledSquares(wp, wr, wn, wb, wq, wk, notWhitePieces, true)) == 0)) {
+                Transposition.addPosition(zobristHash, "", depth, 0);
+                return move + 0;
+            }
+
+            Transposition.addPosition(zobristHash, "", depth, Integer.MIN_VALUE / 3 - depth * 300);
+            return move + (Integer.MIN_VALUE / 3 - depth * 300);
+        }
+
+        Transposition.addPosition(zobristHash, bestMove, depth, score);
         return bestMove + score;
     }
 }
