@@ -308,7 +308,7 @@ public class Evaluation {
         // pawn phalanx
         while (location != 0) {
             int position = Long.numberOfTrailingZeros(location);
-            evaluation += 5;
+            evaluation += 6;
 
             bitboard = bitboard & ~(1L << position);
             location = bitboard & -bitboard;
@@ -442,7 +442,7 @@ public class Evaluation {
         for (int i = 2; i < 6; i++) {
             for (int j = 2; j < 6; j++) {
                 if ((controlledByPlayer & (1L << (63 - (i * 8 + j)))) != 0) {
-                    if (!endGame) eval += 6;
+                    if (!endGame) eval += 10;
                 }
             }
         }
