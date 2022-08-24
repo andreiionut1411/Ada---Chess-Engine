@@ -16,3 +16,4 @@ ELO: 1500 - 1550
 Ada 1.1: The evaluation function now is now "lazy" and is more accurate. It also looks at pawn structure, piece mobility, center control, and also king position during endgames. For speeding up the alpha beta, I ordered the moves and also used the Killer heuristic.
 ELO: 1625 - 1650
 
+Ada 1.2: I replaced the negamax algorithm with PVS(Principle Variation Search). I also added transposition tables in order to store the best move at a certain position, to speed up the algorithm.
