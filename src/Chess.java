@@ -8,7 +8,7 @@ public class Chess {
     // The method prompts the player to ask which color he wants to be.
     private static void askPlayerForColor() {
         String[] options = {"White", "Black", "Random"};
-        int code = JOptionPane.showOptionDialog(null, "What color do you want to play as?", "Welcome to ADA 1.1",
+        int code = JOptionPane.showOptionDialog(null, "What color do you want to play as?", "Welcome to ADA 1.2",
                 JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE, null, options, options[0]);
 
         if (code == 0) {
@@ -29,9 +29,10 @@ public class Chess {
     public static void main(String[] args) {
         MoveGen moveGen = new MoveGen();
         moveGen.initialiseBoard();
+        Transposition.initialiseZobristHash();
         askPlayerForColor();
 
-        JFrame frame = new JFrame("Ada 1.1");
+        JFrame frame = new JFrame("Ada 1.2");
         frame.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
         GraphicalInterface gui = new GraphicalInterface(moveGen);
         frame.add(gui);
