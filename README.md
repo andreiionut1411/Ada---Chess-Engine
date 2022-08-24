@@ -17,3 +17,4 @@ Ada 1.1: The evaluation function now is now "lazy" and is more accurate. It also
 ELO: 1625 - 1650
 
 Ada 1.2: I replaced the negamax algorithm with PVS(Principle Variation Search). I also added transposition tables in order to store the best move at a certain position, to speed up the algorithm.
+ELO: 1800
