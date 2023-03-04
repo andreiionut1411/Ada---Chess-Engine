@@ -13,7 +13,7 @@ In the folder src is the code for the engine, while in versions there are .jar f
 Ada 1.0: It is based on the negamax algorithm with alpha-beta pruning, calculating 6 ply deep. It uses the Piece-Square Tables Only evaluation function by Ronald Friederich.
 ELO: 1500 - 1550
 
-Ada 1.1: The evaluation function now is now "lazy" and is more accurate. It also looks at pawn structure, piece mobility, center control, and also king position during endgames. For speeding up the alpha beta, I ordered the moves and also used the Killer heuristic.
+Ada 1.1: The evaluation function is now "lazy" and is more accurate. It also looks at pawn structure, piece mobility, center control, and also king position during endgames. For speeding up the alpha beta, I ordered the moves and also used the Killer heuristic.
 ELO: 1625 - 1650
 
 Ada 1.2: I replaced the negamax algorithm with PVS(Principle Variation Search). I also added transposition tables in order to store the best move at a certain position, to speed up the algorithm.
